@@ -1,0 +1,37 @@
+{
+  "name": "whatsapp-notification-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "scripts": {
+    "generate": "prisma generate",
+    "build": "npm run generate && tsc",
+    "start": "node --env-file-if-exists=.env dist/src/index.js",
+    "dev": "tsx --env-file-if-exists=.env src/index.ts",
+    "test": "vitest run --exclude tests/postgres.integration.test.ts --pool=forks --maxWorkers=2",
+    "test:integration": "vitest run tests/postgres.integration.test.ts --pool=forks --maxWorkers=1",
+    "check:db": "tsx --env-file-if-exists=.env scripts/check-db.ts",
+    "check:evolution": "tsx --env-file-if-exists=.env scripts/check-evolution.ts",
+    "test:docker": "bash scripts/test-docker.sh"
+  },
+  "dependencies": {
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "axios": "1.21.1",
+    "dotenv": "17.4.2",
+    "pg": "8.23.1",
+    "pino": "10.4.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "@types/pg": "8.23.1",
+    "prisma": "7.10.1",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3",
+    "vitest": "4.1.12"
+  }
+}

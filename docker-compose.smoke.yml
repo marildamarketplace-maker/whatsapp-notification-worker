@@ -1,0 +1,44 @@
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: worker_test
+      POSTGRES_PASSWORD: worker_test_local_only
+      POSTGRES_DB: worker_test
+    volumes:
+      - ./tests/fixtures/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U worker_test -d worker_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  mock:
+    image: node:24-bookworm-slim
+    command: ["node", "/mock.mjs"]
+    volumes:
+      - ./tests/fixtures/mock-evolution.mjs:/mock.mjs:ro
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/instance/connectionState/test').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+  worker:
+    build: .
+    init: true
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mock:
+        condition: service_healthy
+    environment:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://worker_test:worker_test_local_only@postgres:5432/worker_test
+      EVOLUTION_API_URL: http://mock:8080
+      EVOLUTION_API_KEY: mock-only
+      EVOLUTION_INSTANCE: test
+      POLL_INTERVAL_MS: 100
+      SEND_DELAY_MS: 1
+    stop_grace_period: 3m

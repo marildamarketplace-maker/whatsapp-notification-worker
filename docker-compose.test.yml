@@ -1,0 +1,17 @@
+# Isolated fixtures only. Never mount production .env here.
+services:
+  postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_USER: worker_test
+      POSTGRES_PASSWORD: worker_test_local_only
+      POSTGRES_DB: worker_test
+    ports:
+      - "127.0.0.1:55432:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U worker_test -d worker_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 30

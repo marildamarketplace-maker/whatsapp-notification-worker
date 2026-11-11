@@ -1,0 +1,34 @@
+// Projection of the existing schema. Never use db push or migrations from this project.
+// Relation avisoAutomatizacao intentionally omitted: this worker never accesses it.
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+}
+enum NotificationType {
+  WHATSAPP
+}
+enum NotificationStatus {
+  PENDENTE
+  ERRO
+  SUCESSO
+}
+model Notification {
+  id String @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tipo NotificationType
+  to String @db.VarChar(30)
+  titulo String
+  mensagem String
+  data DateTime @default(now()) @db.Timestamptz(6)
+  status NotificationStatus @default(PENDENTE)
+  tentativas Int @default(0)
+  ultimoErro String? @map("ultimo_erro")
+  processandoEm DateTime? @map("processando_em") @db.Timestamptz(6)
+  workerId String? @map("worker_id") @db.Uuid
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at") @db.Timestamptz(6)
+  @@index([status, data], map: "idx_notification_status_data")
+  @@index([processandoEm], map: "idx_notification_processando_em")
+  @@map("notification")
+}
