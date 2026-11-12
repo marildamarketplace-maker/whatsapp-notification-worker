@@ -45,6 +45,22 @@ it('reads WHATSAPP and excludes SUCESSO, ERRO, other types, future, exhausted, a
  expect((await repository.claim(worker,3,120))?.id).toBe(id);
  expect(await repository.claim(worker,3,120)).toBeNull();
 });
+it('runs the compiled read-only database diagnostic with PostgreSQL catalog types',async()=>{
+ const {execFile}=await import('node:child_process');
+ const {promisify}=await import('node:util');
+ await insert();
+ const {stdout}=await promisify(execFile)(process.execPath,['dist/scripts/check-db.js'],{
+  env:{...process.env,NODE_ENV:'test',DATABASE_URL:connectionString!,DIRECT_URL:'',
+   EVOLUTION_API_URL:'http://127.0.0.1:8080',EVOLUTION_API_KEY:'test-key',EVOLUTION_INSTANCE:'test'},
+  timeout:15000,
+ });
+ const result=JSON.parse(stdout);
+ expect(result.enums).toEqual(expect.arrayContaining([expect.objectContaining({enumlabel:'WHATSAPP'})]));
+ expect(result.columns).toEqual(expect.arrayContaining([expect.objectContaining({column_name:'worker_id'})]));
+ expect(result.counts).toEqual([{tipo:'WHATSAPP',status:'PENDENTE',count:1}]);
+ const {rows:[row]}=await admin.query('SELECT status,tentativas,processando_em FROM public.notification');
+ expect(row).toMatchObject({status:'PENDENTE',tentativas:0,processando_em:null});
+});
 it('atomically increments attempts, keeps PENDENTE, and retains microseconds',async()=>{
  const id=await insert();const item=await repository.claim(worker,3,120);expect(item?.id).toBe(id);
  expect(item?.tentativas).toBe(1);expect(item?.worker_id).toBe(worker);

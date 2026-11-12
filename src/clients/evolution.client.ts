@@ -1,7 +1,8 @@
 import axios, { type AxiosInstance } from 'axios';
 import { z } from 'zod';
+import { validateImage } from '../services/message.service.js';
 import type { Config } from '../config/env.js';
-import { DeliveryError, type MessageGateway } from '../types/notification.js';
+import { DeliveryError, type MessageGateway, type ImageAttachment } from '../types/notification.js';
 const accepted = z.object({
   key: z.object({id:z.string().min(1),remoteJid:z.string(),fromMe:z.literal(true)}),
   status: z.enum(['PENDING','SERVER_ACK','DELIVERY_ACK','READ','PLAYED']),
@@ -13,8 +14,11 @@ export class EvolutionClient implements MessageGateway {
   constructor(config: Pick<Config,'EVOLUTION_API_URL'|'EVOLUTION_API_KEY'|'EVOLUTION_INSTANCE'|'REQUEST_TIMEOUT_MS'>, http?: AxiosInstance) {
     this.instance = encodeURIComponent(config.EVOLUTION_INSTANCE);
     this.http = http ?? axios.create({baseURL:config.EVOLUTION_API_URL.replace(/\/$/,''),timeout:config.REQUEST_TIMEOUT_MS,
-      headers:{apikey:config.EVOLUTION_API_KEY,'Content-Type':'application/json'},
-      maxRedirects:0, maxContentLength:1_048_576, maxBodyLength:1_048_576,
+      headers:{apikey:config.EVOLUTION_API_KEY,'Content-Type':'application/json',
+        // Evolution 2.3.7 rejects originless backend calls with a CORS allowlist.
+        // Identify this server's own origin while retaining its restrictive policy.
+        Origin:new URL(config.EVOLUTION_API_URL).origin},
+      maxRedirects:0, maxContentLength:1_048_576, maxBodyLength:8_388_608,
     });
   }
   async connected(): Promise<boolean> {
@@ -30,9 +34,15 @@ export class EvolutionClient implements MessageGateway {
       throw new DeliveryError('safe-retry',status === 401 || status === 403 ? 'AUTHENTICATION' : 'CONNECTION_CHECK_FAILED');
     }
   }
-  async send(number: string, text: string): Promise<{messageId:string}> {
+  async send(number: string, text: string, image?: ImageAttachment): Promise<{messageId:string}> {
+    // Validate before POST, including when this client is used outside the worker.
+    if (image) validateImage(image);
     try {
-      const response = await this.http.post<unknown>(`/message/sendText/${this.instance}`,{number,text});
+      const response = image
+        ? await this.http.post<unknown>(`/message/sendMedia/${this.instance}`,{
+          number,mediatype:'image',mimetype:image.mimetype,media:image.media,caption:text,
+        })
+        : await this.http.post<unknown>(`/message/sendText/${this.instance}`,{number,text});
       const result = accepted.safeParse(response.data);
       if (!result.success || result.data.key.remoteJid !== number)
         throw new DeliveryError('uncertain','SEND_RESPONSE_INVALID');

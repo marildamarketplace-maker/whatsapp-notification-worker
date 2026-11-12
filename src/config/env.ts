@@ -1,12 +1,19 @@
 import { z } from 'zod';
 const integer = (value: number, max = 2_147_483_647) => z.coerce.number().int().positive().max(max).default(value);
-const databaseUrl = z.url().refine(value => ['postgres:', 'postgresql:'].includes(new URL(value).protocol), 'Use PostgreSQL');
+// Zod can run refinements after a URL-format issue; never let URL parsing throw.
+function parseUrl(value: string): URL | null {
+  try { return new URL(value); } catch { return null; }
+}
+const databaseUrl = z.url().refine(value => {
+  const url = parseUrl(value);
+  return url !== null && ['postgres:', 'postgresql:'].includes(url.protocol);
+}, 'Use PostgreSQL');
 export const environmentSchema = z.object({
   NODE_ENV: z.enum(['development','production','test']).default('production'),
-  DATABASE_URL: databaseUrl, DIRECT_URL: z.union([databaseUrl,z.literal('')]).optional(),
+  DATABASE_URL: databaseUrl, DIRECT_URL: z.union([z.literal(''),databaseUrl]).optional(),
   EVOLUTION_API_URL: z.url().refine(value => {
-    const url = new URL(value);
-    return ['https:','http:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash;
+    const url = parseUrl(value);
+    return url !== null && ['https:','http:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash;
   }, 'URL HTTP(S) sem credenciais/query/hash'),
   EVOLUTION_API_KEY: z.string().min(1), EVOLUTION_INSTANCE: z.string().regex(/^[a-zA-Z0-9_-]+$/),
   POLL_INTERVAL_MS: integer(10000,300000), BATCH_SIZE: integer(10,1000),
@@ -25,4 +32,12 @@ export const environmentSchema = z.object({
     context.addIssue({code:'custom',path:['LOCK_TIMEOUT_SECONDS'],message:'Reserva deve comportar backoff máximo, timeouts de rede/banco e intervalo'});
 });
 export type Config = z.infer<typeof environmentSchema>;
-export const loadConfig = (source: NodeJS.ProcessEnv = process.env): Config => environmentSchema.parse(source);
+export function loadConfig(source: NodeJS.ProcessEnv = process.env): Config {
+  const result = environmentSchema.safeParse(source);
+  if (!result.success) {
+    const fields = [...new Set(result.error.issues.map(issue => issue.path.join('.')))];
+    // Report field names only: malformed URLs may contain credentials.
+    throw new Error(`Configuração inválida: ${fields.join(', ')}`);
+  }
+  return result.data;
+}

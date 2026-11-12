@@ -311,3 +311,36 @@ Nenhuma atualização/rollback desbloqueia quarentenas. Confirme saúde e contad
 ## Validação desta entrega
 
 Consulte `docs/validation.md` para resultados executados e limites. Docker, Evolution real e grupo real só podem ser declarados homologados após testes nesses ambientes; aprovação local de build não comprova entrega WhatsApp.
+
+## Instalação realizada na VM Contabo
+
+Consulte [a configuração e os comandos da VM](docs/vm-installation.md). Essa instalação usa HTTPS privado sem domínio; opere o worker pelo helper documentado para carregar a rede e o certificado corretos.
+
+## Envio de fotos e imagens
+
+O worker aceita uma imagem JPEG ou PNG por notificação, até **5 MiB** decodificados. Não requer coluna nova nem migration. Notificações de texto existentes continuam usando `mensagem` normalmente.
+
+Para imagem, grave em `mensagem` o prefixo literal `whatsapp:image:v1` seguido de uma quebra de linha e deste JSON:
+
+```json
+{"media":"BASE64_DO_ARQUIVO","mimetype":"image/jpeg","caption":"Legenda opcional"}
+```
+
+`media` contém somente o Base64 do arquivo completo, sem prefixo `data:`. Para PNG use `image/png`. O campo `caption` pode ser omitido; `titulo` e `caption` compõem a legenda final, limitada a 1.024 caracteres JavaScript. Exemplo no produtor da notificação (Node.js):
+
+```js
+import { readFile } from 'node:fs/promises';
+const arquivo = await readFile('/caminho/foto.jpg');
+const mensagem = 'whatsapp:image:v1\n' + JSON.stringify({
+  media: arquivo.toString('base64'),
+  mimetype: 'image/jpeg',
+  caption: 'Confira os detalhes do produto.',
+});
+// Grave mensagem e titulo usando a mesma criação parametrizada de notificações.
+```
+
+O envio usa `POST /message/sendMedia/{instance}` com `mediatype=image`, conforme o [contrato da Evolution 2.3.7](https://github.com/EvolutionAPI/evolution-api/blob/2.3.7/src/api/dto/sendMessage.dto.ts). Não envia texto separado: a legenda pertence à imagem. São mantidas reserva, intervalo, validação de aceitação e quarentena de respostas ambíguas, sem fallback ou reenvio automático.
+
+Por segurança, URLs, caminhos locais, SVG e data URIs não são aceitos. O worker verifica tamanho, codificação Base64 canônica e assinatura JPEG/PNG; isso não substitui decodificação completa ou análise antimalware no produtor. Payload inválido termina em `ERRO / INVALID_IMAGE_PAYLOAD` antes de acessar a Evolution. Não registre o Base64 nos logs. Considere o aumento de aproximadamente 33% no armazenamento pelo Base64 e limite o tamanho também no serviço que cria notificações.
+
+Implementação validada com testes locais e servidor HTTP simulado; entrega de imagem no WhatsApp real ainda exige homologação. Não inicie o worker contra produção apenas para testar, pois ele consome todas as notificações elegíveis.

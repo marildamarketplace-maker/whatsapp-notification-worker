@@ -12,9 +12,13 @@ export interface NotificationRepository {
   quarantine(item: ReservedNotification, reason: string): Promise<boolean>;
   stats(leaseSeconds: number, maxRetries: number): Promise<{pending: number; stale: number}>;
 }
+export interface ImageAttachment {
+  media: string;
+  mimetype: 'image/jpeg' | 'image/png';
+}
 export interface MessageGateway {
   connected(): Promise<boolean>;
-  send(number: string, text: string): Promise<{messageId: string}>;
+  send(number: string, text: string, image?: ImageAttachment): Promise<{messageId: string}>;
 }
 export type FailureKind = 'safe-retry' | 'permanent' | 'uncertain';
 export class DeliveryError extends Error {

@@ -76,3 +76,24 @@ describe('notification processing',()=>{
     expect(wait.mock.calls[1]?.[0]).toBeGreaterThan(1400);
   });
 });
+
+describe('image notifications',()=>{
+ const image={media:'iVBORw0KGgo=',mimetype:'image/png'};
+ const photo={...item,mensagem:'whatsapp:image:v1\n'+JSON.stringify({...image,caption:'Detalhes'})};
+ it('sends image once with title and caption',async()=>{
+  const {repo,gateway,service,stop}=setup();await service.process(photo,stop.signal);
+  expect(gateway.send).toHaveBeenCalledExactlyOnceWith('120363412284116447@g.us',item.titulo+'\n\nDetalhes',image);
+  expect(repo.finish).toHaveBeenCalledWith(photo,'SUCESSO',null,120);
+ });
+ it('rejects invalid image before checking connection',async()=>{
+  const {repo,gateway,service,stop}=setup();await service.process({...photo,mensagem:'whatsapp:image:v1\n{}'},stop.signal);
+  expect(gateway.connected).not.toHaveBeenCalled();expect(gateway.send).not.toHaveBeenCalled();
+  expect(repo.finish).toHaveBeenCalledWith(expect.anything(),'ERRO','INVALID_IMAGE_PAYLOAD',120);
+ });
+ it('quarantines ambiguous image acceptance without releasing or fallback text',async()=>{
+  const {repo,gateway,service,stop}=setup();gateway.send.mockRejectedValue(new DeliveryError('uncertain','TRANSPORT_UNCERTAIN'));
+  await service.process(photo,stop.signal);
+  expect(gateway.send).toHaveBeenCalledTimes(1);expect(repo.finish).not.toHaveBeenCalled();
+  expect(repo.quarantine).toHaveBeenCalledWith(photo,'TRANSPORT_UNCERTAIN');
+ });
+});

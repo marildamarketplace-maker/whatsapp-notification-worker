@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
+# Compose exec must not consume commands from a parent SSH provisioning script.
+exec </dev/null
 # Entirely isolated Compose project; no production .env is loaded.
 compose=(docker compose -p whatsapp-worker-smoke --env-file /dev/null -f docker-compose.smoke.yml)
 cleanup() { "${compose[@]}" down -v --remove-orphans; }

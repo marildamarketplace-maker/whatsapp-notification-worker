@@ -1,7 +1,8 @@
 import type { Logger } from 'pino';
 import type { Config } from '../config/env.js';
 import { DeliveryError, type MessageGateway, type NotificationRepository, type ReservedNotification } from '../types/notification.js';
-import { normalizeWhatsAppRecipient, formatMessage } from './recipient.service.js';
+import { normalizeWhatsAppRecipient } from './recipient.service.js';
+import { prepareMessage } from './message.service.js';
 import { retryDelay, sleep } from '../utils/retry.js';
 export class NotificationService {
   private lastSend = 0;
@@ -36,6 +37,9 @@ export class NotificationService {
     let number: string;
     try { number = normalizeWhatsAppRecipient(item.to); }
     catch { await this.complete(item,'ERRO','INVALID_RECIPIENT'); return; }
+    let message: ReturnType<typeof prepareMessage>;
+    try { message = prepareMessage(item.titulo,item.mensagem); }
+    catch { await this.complete(item,'ERRO','INVALID_IMAGE_PAYLOAD'); return; }
     try {
       this.progress(this.config.REQUEST_TIMEOUT_MS);
       if (!await this.gateway.connected()) throw new DeliveryError('safe-retry','INSTANCE_DISCONNECTED');
@@ -64,7 +68,9 @@ export class NotificationService {
     this.progress(this.config.REQUEST_TIMEOUT_MS);
     try {
       // No automatic HTTP retries. Do not abort a started send on graceful shutdown.
-      const response = await this.gateway.send(number,formatMessage(item.titulo,item.mensagem));
+      const response = message.image
+        ? await this.gateway.send(number,message.text,message.image)
+        : await this.gateway.send(number,message.text);
       this.log.info({notificationId:item.id,messageId:response.messageId},'evolution_accepted');
     } catch (error) {
       if (error instanceof DeliveryError && error.kind === 'permanent') await this.complete(item,'ERRO',error.code);
