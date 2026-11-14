@@ -59,6 +59,14 @@ Para operar o worker **após configurar banco e concluir pareamento/homologaçã
 
 O helper usa o Compose original e o override da VM. Não execute somente o Compose original nesta instalação, pois ele não inclui a rede/certificado privados. Iniciar o worker processa todas as notificações elegíveis.
 
+Para reconstruir sem cache e recriar o worker quando necessário:
+
+```bash
+bash ~/whatsapp-notification-worker/recriar-worker.sh
+```
+
+O script atualiza a imagem base e ignora o cache de build em cada execução. Somente após o build passar ele recria o contêiner do worker, preservando a configuração da VM. Não apaga volumes, sessões do WhatsApp nem o cache de outros serviços. O script usa os arquivos locais atuais; não baixa alterações do repositório. Ao final, mostra o estado e os últimos logs; isso não comprova entrega de mensagens.
+
 ## Verificações executadas
 
 - Build Docker do worker: passou.
