@@ -27,6 +27,23 @@ it('reports invalid fields without leaking malformed credential values',()=>{
 });
 it('requires HTTPS in production',()=>{expect(environmentSchema.safeParse({...config,NODE_ENV:'production'}).success).toBe(false);});
 it('rejects unsupported concurrency',()=>{expect(environmentSchema.safeParse({...config,MAX_CONCURRENT_SENDS:2}).success).toBe(false);});
+it('defaults to adaptive polling, five-minute statistics and a two-minute idle connection',()=>{
+ expect(config).toMatchObject({POLL_INTERVAL_MS:10000,POLL_MAX_INTERVAL_MS:60000,STATS_INTERVAL_MS:300000,PG_IDLE_TIMEOUT_MS:120000});
+});
+it.each(['POLL_MAX_INTERVAL_MS','STATS_INTERVAL_MS','PG_IDLE_TIMEOUT_MS'])('rejects invalid %s',field=>{
+ for(const value of [0,-1,1.5,'invalid',3600001])
+  expect(environmentSchema.safeParse({...config,[field]:value}).success).toBe(false);
+});
+it('rejects an idle cap below the initial poll interval',()=>{
+ expect(environmentSchema.safeParse({...config,POLL_MAX_INTERVAL_MS:5000}).success).toBe(false);
+});
+it.each([30000,60000])('rejects a pool timeout of %s that would expire between idle polls',timeout=>{
+ expect(environmentSchema.safeParse({...config,PG_IDLE_TIMEOUT_MS:timeout}).success).toBe(false);
+});
+it('accepts custom poll limits with a longer pool timeout',()=>{
+ expect(environmentSchema.safeParse({...config,POLL_INTERVAL_MS:60000,POLL_MAX_INTERVAL_MS:300000,
+  PG_IDLE_TIMEOUT_MS:360000,STATS_INTERVAL_MS:600000}).success).toBe(true);
+});
 it('rejects unsafe lease duration',()=>{expect(environmentSchema.safeParse({...config,LOCK_TIMEOUT_SECONDS:20}).success).toBe(false);});
 it('rejects URL credentials',()=>{expect(environmentSchema.safeParse({...config,EVOLUTION_API_URL:'https://user:password@example.com'}).success).toBe(false);});
 it('uses exponential backoff and bounded positive jitter',()=>{

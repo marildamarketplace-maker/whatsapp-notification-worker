@@ -12,7 +12,7 @@ async function main(): Promise<void> {
   const log = createLogger(config.LOG_LEVEL);
   const workerId = randomUUID();
   const controller = new AbortController();
-  const db = createPrisma(config.DATABASE_URL,config.NODE_ENV!=='test',config.PG_CA_FILE);
+  const db = createPrisma(config.DATABASE_URL,config.NODE_ENV!=='test',config.PG_CA_FILE,config.PG_IDLE_TIMEOUT_MS);
   let shutdownTimer: NodeJS.Timeout | undefined;
   const shutdown = (signal: string) => {
     if (controller.signal.aborted) return;

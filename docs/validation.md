@@ -1,4 +1,24 @@
-# Validação — 11/11/2026
+# Validação
+
+## 16/11/2026 — Redução de consultas ociosas
+
+Executada com Node.js **24.22.3**, Prisma **7.10.1** e PostgreSQL **18.6** em cluster temporário local, acessível somente por loopback e encerrado após os testes.
+
+| Verificação | Resultado |
+| --- | --- |
+| Geração do Prisma Client + build TypeScript | Passou |
+| Tipagem dos fontes e testes (`tsc -p tsconfig.tests.json`) | Passou |
+| Testes unitários e HTTP simulado | 116 passaram |
+| Integração com PostgreSQL real local e processos do worker | 14 passaram |
+| Build/lifecycle Docker e publicação na VM | Não executados nesta alteração |
+
+Os novos testes cobrem a espera 10/20/40/60 segundos, teto configurável, retorno ao intervalo inicial após trabalho/falha, cadência das estatísticas e continuidade dos envios após falha de monitoramento. Também verificam cancelamento da espera, manutenção de reservas no desligamento, contagem UTF-8 de conteúdo incluindo imagens e ausência de conteúdo/destinatário nos novos logs.
+
+O teste do cliente PostgreSQL confirma a identificação `whatsapp-notification-worker` e a preservação da verificação TLS mesmo com parâmetros conflitantes na URL. A suíte de integração confirma a identificação no servidor, reservas concorrentes sem duplicidade, SKIP LOCKED, quarentena e reinício sem reenvio. Os testes usaram credenciais e Evolution simuladas; o `.env` local não foi usado para enviar mensagens (a validação separada identificou `EVOLUTION_API_KEY` ausente).
+
+Nenhuma migration, alteração de banco de produção ou publicação foi necessária/executada. O diagnóstico anterior consultou somente agregados do Supabase; a implementação foi validada em banco local. Os novos padrões entram em vigor após atualizar o código e recriar o container na VM. O efeito no egress faturado ainda precisa ser medido após essa atualização.
+
+## Histórico — 11/11/2026
 
 Executada localmente com Node.js **24.22.2**, TypeScript strict e Prisma **7.10.1**.
 

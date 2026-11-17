@@ -1,7 +1,7 @@
 import { loadConfig } from '../src/config/env.js';
 import { createPrisma } from '../src/database/prisma.js';
 const config = loadConfig();
-const db = createPrisma(config.DATABASE_URL,config.NODE_ENV!=='test',config.PG_CA_FILE);
+const db = createPrisma(config.DATABASE_URL,config.NODE_ENV!=='test',config.PG_CA_FILE,config.PG_IDLE_TIMEOUT_MS);
 let stage = 'connection';
 try {
   await db.$queryRaw`SELECT 1`;

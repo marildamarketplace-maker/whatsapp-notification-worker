@@ -38,6 +38,10 @@ async function insert(overrides: Record<string,unknown>={}) {
  await admin.query(`INSERT INTO public.notification (${keys.map(key=>`"${key}"`).join(',')}) VALUES (${keys.map((_,i)=>`$${i+1}`).join(',')})`,Object.values(value));
  return value.id;
 }
+it('identifies worker connections in PostgreSQL',async()=>{
+ const rows=await db.$queryRaw<{name:string}[]>`SELECT current_setting('application_name') AS name`;
+ expect(rows).toEqual([{name:'whatsapp-notification-worker'}]);
+});
 it('reads WHATSAPP and excludes SUCESSO, ERRO, other types, future, exhausted, and locked rows',async()=>{
  const id=await insert();await insert({status:'SUCESSO'});await insert({status:'ERRO'});await insert({tipo:'OTHER_TEST_ONLY'});
  await insert({data:new Date(Date.now()+3600000)});await insert({tentativas:3});

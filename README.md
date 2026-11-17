@@ -9,6 +9,8 @@ Consome exclusivamente `public.notification`, tipo `WHATSAPP`, status `PENDENTE`
 - Reserva transacional com `FOR UPDATE SKIP LOCKED`, incremento de `tentativas` e UUID por processo. Nenhuma transação permanece aberta durante HTTP.
 - Ordenação por `data`, `created_at`, `id`. `data <= NOW()`, `tentativas < MAX_RETRIES`, ambos os campos de reserva nulos.
 - `BATCH_SIZE` limita quantos itens um ciclo processa. A reserva é feita um item por vez, imediatamente antes do processamento, para não expirar o restante do lote esperando. Ciclos não se sobrepõem.
+- Fila vazia usa espera adaptativa: 10, 20, 40 e até 60 segundos por padrão. Encontrar trabalho ou falhar no processamento restaura a pausa inicial. A espera é interrompida por SIGTERM/SIGINT; o healthcheck acompanha o prazo real.
+- Estatísticas são consultadas na inicialização e, quando vencido o intervalo de 5 minutos, no início do próximo ciclo. Não há consultas paralelas nem compensação de intervalos perdidos. Falha nas estatísticas gera alerta e não impede reservas/envios; falha no processamento mantém o healthcheck degradado.
 - Concorrência suportada nesta versão: **1** por processo, validada em ambiente. Múltiplos processos não reservam o mesmo registro, mas cada processo tem seu próprio intervalo entre envios. Para manter 1,5 s por instância Evolution, execute **uma réplica por instância**. Escalar exige rate limiter compartilhado ou instâncias separadas.
 - Toda finalização exige ID, worker UUID, timestamp exato da reserva, `WHATSAPP`, `PENDENTE` e reserva não expirada. O token de timestamp trafega como texto PostgreSQL, preservando microssegundos.
 - `to` e `data` nunca são alterados. `updated_at` continua sendo a hora real da alteração, nunca um agendamento futuro.
@@ -126,7 +128,10 @@ Prisma foi mantido na série 7.10 do sistema original e atualizado ao patch 7.10
 | `EVOLUTION_API_URL` | HTTPS da Evolution; sem usuário/senha/query/hash. |
 | `EVOLUTION_API_KEY` | API Key do servidor/instância, obrigatória. |
 | `EVOLUTION_INSTANCE` | Nome da instância: letras, dígitos, `_` e `-`. |
-| `POLL_INTERVAL_MS` | 10000, pausa após cada ciclo. |
+| `POLL_INTERVAL_MS` | 10000, pausa inicial com fila vazia e pausa após ciclos com trabalho ou falha. |
+| `POLL_MAX_INTERVAL_MS` | 60000, teto da espera adaptativa; deve ser maior ou igual a `POLL_INTERVAL_MS`. Valores iguais desativam o crescimento da espera. |
+| `STATS_INTERVAL_MS` | 300000, intervalo mínimo entre consultas de estatísticas, inclusive após falha. Verificado no início de cada ciclo. |
+| `PG_IDLE_TIMEOUT_MS` | 120000, tempo ocioso antes de fechar uma conexão do pool; deve ser maior que `POLL_MAX_INTERVAL_MS`. |
 | `BATCH_SIZE` | 10 itens máximos por ciclo. |
 | `MAX_CONCURRENT_SENDS` | 1; outros valores são rejeitados nesta versão. |
 | `MAX_RETRIES` | 3 reservas/tentativas, inclusive falhas antes do envio. |
@@ -138,6 +143,10 @@ Prisma foi mantido na série 7.10 do sistema original e atualizado ao patch 7.10
 | `PG_CA_FILE` | Caminho opcional para CA PostgreSQL confiável. |
 
 PostgreSQL usa verificação de certificado (`rejectUnauthorized: true`) em `production` e `development`. Parâmetros SSL da URL são removidos para não sobrepor essa verificação; configure a CA correta em `PG_CA_FILE` se necessário. Em Docker, monte a CA somente leitura, por exemplo `/run/secrets/supabase-ca.crt`, e configure esse caminho. Não use `NODE_ENV=test` em produção.
+
+O pool mantém no máximo três conexões e define `application_name=whatsapp-notification-worker`, inclusive se a URL tiver outro nome. Isso facilita localizar as conexões em `pg_stat_activity`; não é uma medição de bytes faturados. Os timeouts de conexão e consulta continuam limitados. Configurações existentes recebem os novos padrões automaticamente; se a pausa inicial já exceder 60 segundos, ajuste também o teto e o tempo ocioso do pool.
+
+Com os padrões, em ociosidade prolongada há aproximadamente 1.440 tentativas de reserva e até 288 consultas de estatísticas por dia por processo, além dos comandos de transação. A redução é de cerca de 90% frente às 17.280 operações principais/dia do ciclo fixo anterior. O trade-off é até 60 segundos de espera para detectar uma mensagem quando o worker está ocioso, mais o tempo das operações do ciclo. Esse percentual não representa redução equivalente no egress total.
 
 ## Supabase: conexão e validação sem escrita
 
@@ -239,7 +248,9 @@ Exemplos ilustrativos:
 {"level":40,"notificationId":"UUID","code":"TRANSPORT_UNCERTAIN","recorded":true,"msg":"notification_quarantined"}
 ```
 
-Monitore `queue_status.pending`, `queue_status.stale`, `notification_quarantined`, `cycle_failed`, `AUTHENTICATION` e ausência prolongada de `cycle_completed`. O healthcheck lê um arquivo atômico de progresso com prazo específico da operação atual; um timer independente não o mantém artificialmente saudável. Detecta processo morto, operação travada ou ciclo com falha SQL. Conexão Evolution degradada é reportada por logs, não implica necessariamente liveness quebrada.
+Monitore `queue_status.pending`, `queue_status.stale`, `queue_stats_failed`, `notification_quarantined`, `cycle_failed`, `AUTHENTICATION` e ausência prolongada de `cycle_completed`. `queue_status` passa a ser emitido aproximadamente a cada 5 minutos, e `cycle_completed` pode ter até 60 segundos entre ciclos ociosos. O healthcheck lê um arquivo atômico de progresso com prazo específico da operação atual; um timer independente não o mantém artificialmente saudável. Detecta processo morto, operação travada ou ciclo com falha de processamento. Conexão Evolution degradada e falha apenas nas estatísticas são reportadas por logs, não implicam necessariamente liveness quebrada.
+
+`cycle_completed` inclui `reserved`, `payloadBytes` e `pollIntervalMs`. `payloadBytes` soma os bytes UTF-8 de `titulo` e `mensagem` recebidos em cada reserva, incluindo Base64 e releituras em novas tentativas. `cycle_failed` também registra o total parcial recebido antes da falha. Somar esses campos estima o tráfego de conteúdo do banco para o worker, sem consultas extras e sem registrar conteúdo ou destinatários. Não inclui outros campos, respostas vazias, transações, protocolo/TLS ou tráfego HTTP da Evolution; portanto não equivale ao egress faturado pelo Supabase.
 
 **Docker Compose não reinicia um container só por ficar unhealthy**. `restart: unless-stopped` reinicia quando o processo termina ou o daemon volta. Configure alerta externo para unhealthy e investigue antes de reiniciar; reservas continuam bloqueadas. Falhas fatais na inicialização causam saída não zero e reinício. O worker atende SIGTERM/SIGINT, para novas reservas, aguarda POST já iniciado/finalização e desconecta Prisma. A parada tem limite interno de timeout HTTP + 30 segundos; o Compose concede 3 minutos.
 

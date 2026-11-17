@@ -16,7 +16,9 @@ export const environmentSchema = z.object({
     return url !== null && ['https:','http:'].includes(url.protocol) && !url.username && !url.password && !url.search && !url.hash;
   }, 'URL HTTP(S) sem credenciais/query/hash'),
   EVOLUTION_API_KEY: z.string().min(1), EVOLUTION_INSTANCE: z.string().regex(/^[a-zA-Z0-9_-]+$/),
-  POLL_INTERVAL_MS: integer(10000,300000), BATCH_SIZE: integer(10,1000),
+  POLL_INTERVAL_MS: integer(10000,300000), POLL_MAX_INTERVAL_MS: integer(60000,300000),
+  STATS_INTERVAL_MS: integer(300000,3600000), PG_IDLE_TIMEOUT_MS: integer(120000,3600000),
+  BATCH_SIZE: integer(10,1000),
   // Sequential sending is intentional: raising concurrency needs a shared rate limiter.
   MAX_CONCURRENT_SENDS: z.coerce.number().int().min(1).max(1).default(1),
   MAX_RETRIES: integer(3,20), RETRY_BASE_DELAY_MS: integer(30000,3600000),
@@ -27,6 +29,10 @@ export const environmentSchema = z.object({
 }).superRefine((value, context) => {
   if (value.NODE_ENV === 'production' && !value.EVOLUTION_API_URL.startsWith('https://'))
     context.addIssue({code:'custom',path:['EVOLUTION_API_URL'],message:'HTTPS obrigatório em produção'});
+  if (value.POLL_MAX_INTERVAL_MS < value.POLL_INTERVAL_MS)
+    context.addIssue({code:'custom',path:['POLL_MAX_INTERVAL_MS'],message:'Espera máxima deve ser maior ou igual à pausa inicial'});
+  if (value.PG_IDLE_TIMEOUT_MS <= value.POLL_MAX_INTERVAL_MS)
+    context.addIssue({code:'custom',path:['PG_IDLE_TIMEOUT_MS'],message:'Conexão ociosa deve durar mais que a espera máxima da fila'});
   const maxBackoff = value.MAX_RETRIES > 1 ? Math.min(3600000, value.RETRY_BASE_DELAY_MS * 2 ** (value.MAX_RETRIES - 2) * 1.25) : 0;
   if (value.LOCK_TIMEOUT_SECONDS * 1000 <= Math.max(maxBackoff, value.REQUEST_TIMEOUT_MS) + value.REQUEST_TIMEOUT_MS + value.SEND_DELAY_MS + 20000)
     context.addIssue({code:'custom',path:['LOCK_TIMEOUT_SECONDS'],message:'Reserva deve comportar backoff máximo, timeouts de rede/banco e intervalo'});
